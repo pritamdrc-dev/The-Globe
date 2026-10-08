@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atlas Globe</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=Inter:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #04070f; --ink: #e8eef9; --muted: #8a97b3; --line: rgba(255,255,255,.1);
+    --glow: #ffb454; --atmo: #4aa3ff; --panel: rgba(8,13,26,.62);
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--ink);
+    font: 400 14px/1.5 Inter, system-ui, sans-serif; }
+  #scene { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+  #scene.dragging { cursor: grabbing; }
+  header { position: fixed; top: 28px; left: 32px; pointer-events: none; }
+  header h1 { font: 600 28px/1.1 Fraunces, Georgia, serif; letter-spacing: -.01em; }
+  header p { color: var(--muted); margin-top: 4px; }
+  #list { position: fixed; top: 110px; left: 24px; width: 260px; max-height: calc(100% - 150px); overflow-y: auto;
+    padding: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+  #list button { display: flex; width: 100%; align-items: baseline; justify-content: space-between; gap: 8px;
+    padding: 10px 12px; background: none; border: 0; border-radius: 9px; color: var(--ink);
+    font: inherit; text-align: left; cursor: pointer; transition: background .2s; }
+  #list button span { color: var(--muted); font-size: 12px; }
+  #list button:hover { background: rgba(255,255,255,.06); }
+  #list button.active { background: rgba(255,180,84,.14); }
+  #list button.active::before { content: ""; }
+  button:focus-visible { outline: 2px solid var(--glow); outline-offset: 1px; }
+  #card { position: fixed; right: 32px; bottom: 32px; width: 320px; padding: 20px 22px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    opacity: 0; transform: translateY(8px); transition: opacity .35s, transform .35s; pointer-events: none; }
+  #card.show { opacity: 1; transform: none; pointer-events: auto; }
+  #card h2 { font: 600 22px/1.2 Fraunces, Georgia, serif; }
+  #card .coord { color: var(--glow); font-size: 12px; margin: 2px 0 10px; }
+  #card p { color: #c3cde0; }
+  #card button { margin-top: 14px; padding: 7px 14px; background: none; color: var(--ink);
+    border: 1px solid var(--line); border-radius: 8px; font: inherit; cursor: pointer; }
+  #card button:hover { background: rgba(255,255,255,.06); }
+  #hint { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); color: var(--muted);
+    font-size: 12px; pointer-events: none; transition: opacity .6s; }
+  @media (max-width: 720px) {
+    header { top: 18px; left: 18px; } header h1 { font-size: 22px; }
+    #list { top: auto; bottom: 14px; left: 10px; right: 10px; width: auto; max-height: none;
+      display: flex; overflow-x: auto; overflow-y: hidden; }
+    #list button { width: auto; flex: none; flex-direction: column; gap: 0; white-space: nowrap; }
+    #card { right: 10px; left: 10px; width: auto; bottom: 84px; }
+    #hint { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { #card { transition: none; } }
+</style>
+</head>
+<body>
+<canvas id="scene"></canvas>
+<header><h1>Atlas Globe</h1><p>Drag to spin. Select a place to fly there.</p></header>
+<nav id="list" aria-label="Featured locations"></nav>
+<aside id="card" aria-live="polite">
+  <h2 id="cName"></h2><div class="coord" id="cCoord"></div><p id="cDesc"></p>
+  <button id="cClose">Back to globe</button>
+</aside>
+<div id="hint">Esc or click empty space to release focus</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ---- Edit this list to change the featured locations ----
+const LOCATIONS = [
+  { name: "Reykjavík",     country: "Iceland",       lat: 64.15,  lon: -21.94, desc: "Geothermal pools and a midnight sun in summer, northern lights in winter." },
+  { name: "New York",      country: "United States", lat: 40.71,  lon: -74.01, desc: "Dense, fast and walkable, with a skyline that defines the Atlantic coast." },
+  { name: "Rio de Janeiro",country: "Brazil",        lat: -22.91, lon: -43.17, desc: "Granite peaks drop straight into the sea beside Copacabana and Ipanema." },
+  { name: "Cape Town",     country: "South Africa",  lat: -33.92, lon: 18.42,  desc: "Table Mountain looks over two oceans meeting at the Cape." },
+  { name: "Cairo",         country: "Egypt",         lat: 30.04,  lon: 31.24,  desc: "The Nile's great delta city, within sight of the Giza pyramids." },
+  { name: "Dubai",         country: "UAE",           lat: 25.2,   lon: 55.27,  desc: "Desert coast turned vertical, home to the tallest tower on Earth." },
+  { name: "Mumbai",        country: "India",         lat: 19.08,  lon: 72.88,  desc: "A harbour megacity of film studios, markets and sea-facing promenades." },
+  { name: "Tokyo",         country: "Japan",         lat: 35.68,  lon: 139.69, desc: "The largest metro area on the planet, equal parts neon and quiet shrines." },
+  { name: "Sydney",        country: "Australia",     lat: -33.87, lon: 151.21, desc: "Harbour-front sails of the Opera House and surf beaches within a short ride." }
+];
+
+const rad = d => d * Math.PI / 180;
+const R = 1;
+// lat/lon -> point on a sphere matching three.js equirectangular UV mapping
+const toVec = (lat, lon, r = R) => new THREE.Vector3(
+  r * Math.cos(rad(lat)) * Math.cos(rad(lon)), r * Math.sin(rad(lat)), -r * Math.cos(rad(lat)) * Math.sin(rad(lon)));
+
+const canvas = document.getElementById("scene");
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setClearColor(0x04070f);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
+
+// ---- lighting ----
+scene.add(new THREE.AmbientLight(0x6f86b8, 0.9));
+const sun = new THREE.DirectionalLight(0xfff1dc, 0.9);
+sun.position.set(-3, 1.5, 4);
+scene.add(sun);
+
+// ---- globe ----
+const globe = new THREE.Group();
+scene.add(globe);
+const earthMat = new THREE.MeshStandardMaterial({ color: 0x0d2347, roughness: 0.95, metalness: 0 });
+const earth = new THREE.Mesh(new THREE.SphereGeometry(R, 96, 96), earthMat);
+globe.add(earth);
+new THREE.TextureLoader().setCrossOrigin("anonymous").load(
+  "https://cdn.jsdelivr.net/npm/three-globe@2.31.0/example/img/earth-blue-marble.jpg",
+  tex => { earthMat.map = tex; earthMat.color.set(0xffffff); earthMat.needsUpdate = true; },
+  undefined, () => console.warn("Earth texture failed to load; using plain sphere.")
+);
+
+// ---- atmosphere (fresnel rim, rendered on a larger back-face sphere) ----
+const atmo = new THREE.Mesh(new THREE.SphereGeometry(R * 1.18, 64, 64), new THREE.ShaderMaterial({
+  transparent: true, side: THREE.BackSide, blending: THREE.AdditiveBlending, depthWrite: false,
+  vertexShader: `varying vec3 vN; void main(){ vN = normalize(normalMatrix * normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.); }`,
+  fragmentShader: `varying vec3 vN; void main(){ float i = pow(0.62 - dot(vN, vec3(0.,0.,1.)), 3.0); gl_FragColor = vec4(0.29,0.64,1.0,1.0) * clamp(i,0.,1.) * 1.4; }`
+}));
+scene.add(atmo);
+const rim = new THREE.Mesh(new THREE.SphereGeometry(R * 1.015, 64, 64), new THREE.ShaderMaterial({
+  transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+  vertexShader: `varying vec3 vN; void main(){ vN = normalize(normalMatrix * normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.); }`,
+  fragmentShader: `varying vec3 vN; void main(){ float i = pow(1.0 - abs(dot(vN, vec3(0.,0.,1.))), 3.0); gl_FragColor = vec4(0.29,0.64,1.0,1.0) * i * 0.55; }`
+}));
+scene.add(rim);
+
+// ---- stars ----
+{
+  const n = 900, p = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    const v = new THREE.Vector3().randomDirection().multiplyScalar(20 + Math.random() * 20);
+    p.set([v.x, v.y, v.z], i * 3);
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.BufferAttribute(p, 3));
+  scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0x9db4e0, size: 0.07, sizeAttenuation: true, transparent: true, opacity: 0.7 })));
+}
+
+// ---- markers ----
+const glowTex = (() => {
+  const c = document.createElement("canvas"); c.width = c.height = 128;
+  const x = c.getContext("2d"), g = x.createRadialGradient(64, 64, 0, 64, 64, 64);
+  g.addColorStop(0, "rgba(255,255,255,1)"); g.addColorStop(.25, "rgba(255,255,255,.55)"); g.addColorStop(1, "rgba(255,255,255,0)");
+  x.fillStyle = g; x.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(c);
+})();
+const COL = new THREE.Color(0xffb454), COL_ON = new THREE.Color(0xffe3a8);
+const markers = LOCATIONS.map((loc, i) => {
+  const pos = toVec(loc.lat, loc.lon, R * 1.004);
+  const core = new THREE.Mesh(new THREE.SphereGeometry(0.014, 16, 16), new THREE.MeshBasicMaterial({ color: COL.clone() }));
+  const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: COL.clone(), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }));
+  const hit = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 8), new THREE.MeshBasicMaterial({ visible: false }));
+  [core, halo, hit].forEach(o => o.position.copy(pos));
+  halo.scale.setScalar(0.12);
+  hit.userData.index = i;
+  globe.add(core, halo, hit);
+  return { loc, core, halo, hit, pos, phase: i * 0.9 };
+});
+
+// ---- state ----
+let rotX = 0.35, rotY = -1.2, velY = 0, velX = 0;
+let tgtX = null, tgtY = null;          // focus targets (null = free)
+let zoom = 3.4, tgtZoom = 3.4;
+let dragging = false, lastX = 0, lastY = 0, downX = 0, downY = 0, moved = 0;
+let lastInteract = -10, active = -1;
+const AUTO = 0.12, RESUME_AFTER = 2.5, FAR = 3.4, NEAR = 2.35;
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+// ---- UI ----
+const listEl = document.getElementById("list"), card = document.getElementById("card");
+LOCATIONS.forEach((l, i) => {
+  const b = document.createElement("button");
+  b.innerHTML = `${l.name}<span>${l.country}</span>`;
+  b.onclick = () => focus(i);
+  listEl.appendChild(b);
+});
+document.getElementById("cClose").onclick = release;
+addEventListener("keydown", e => { if (e.key === "Escape") release(); });
+
+function focus(i) {
+  active = i;
+  const { lat, lon } = LOCATIONS[i];
+  tgtX = rad(lat) * 0.85;
+  // choose the equivalent Y angle nearest to current rotation for the shortest turn
+  const base = -Math.PI / 2 - rad(lon);
+  tgtY = base + Math.round((rotY - base) / (2 * Math.PI)) * 2 * Math.PI;
+  tgtZoom = NEAR; velY = velX = 0;
+  [...listEl.children].forEach((b, k) => b.classList.toggle("active", k === i));
+  document.getElementById("cName").textContent = LOCATIONS[i].name + ", " + LOCATIONS[i].country;
+  document.getElementById("cCoord").textContent = `${Math.abs(lat).toFixed(2)}° ${lat >= 0 ? "N" : "S"}, ${Math.abs(lon).toFixed(2)}° ${lon >= 0 ? "E" : "W"}`;
+  document.getElementById("cDesc").textContent = LOCATIONS[i].desc;
+  card.classList.add("show");
+  if (listEl.children[i].scrollIntoView) listEl.children[i].scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
+}
+function release() {
+  active = -1; tgtX = tgtY = null; tgtZoom = FAR;
+  card.classList.remove("show");
+  [...listEl.children].forEach(b => b.classList.remove("active"));
+}
+
+// ---- input ----
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+canvas.addEventListener("pointerdown", e => {
+  dragging = true; moved = 0; lastX = downX = e.clientX; lastY = downY = e.clientY;
+  canvas.setPointerCapture(e.pointerId); canvas.classList.add("dragging");
+  tgtX = tgtY = null; velY = velX = 0; // user takes control, cancelling any fly-to
+});
+canvas.addEventListener("pointermove", e => {
+  if (!dragging) return;
+  const dx = e.clientX - lastX, dy = e.clientY - lastY;
+  lastX = e.clientX; lastY = e.clientY; moved += Math.abs(dx) + Math.abs(dy);
+  const k = 0.0055 * (zoom / FAR);
+  rotY += dx * k; rotX = Math.max(-1.3, Math.min(1.3, rotX + dy * k));
+  velY = dx * k * 60; velX = dy * k * 60;
+  lastInteract = clock.elapsedTime;
+});
+const up = e => {
+  if (!dragging) return;
+  dragging = false; canvas.classList.remove("dragging"); lastInteract = clock.elapsedTime;
+  if (moved < 5) pick(e.clientX, e.clientY);
+};
+canvas.addEventListener("pointerup", up);
+canvas.addEventListener("pointercancel", () => { dragging = false; canvas.classList.remove("dragging"); });
+canvas.addEventListener("wheel", e => {
+  e.preventDefault(); lastInteract = clock.elapsedTime;
+  tgtZoom = Math.max(1.9, Math.min(5, tgtZoom + e.deltaY * 0.002));
+}, { passive: false });
+
+function pick(x, y) {
+  ndc.set((x / innerWidth) * 2 - 1, -(y / innerHeight) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  const hits = ray.intersectObjects(markers.map(m => m.hit));
+  const front = hits.find(h => h.object.getWorldPosition(new THREE.Vector3()).dot(camera.position) > 0.9);
+  if (front) focus(front.object.userData.index);
+  else if (active >= 0 && !ray.intersectObject(earth).length) release();
+  else if (active >= 0) release();
+}
+
+// ---- loop ----
+function resize() {
+  const w = innerWidth, h = innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  // keep the globe fully visible on narrow screens
+  camera.fov = w / h < 0.8 ? 55 : 40;
+  camera.updateProjectionMatrix();
+}
+addEventListener("resize", resize); resize();
+
+const clock = new THREE.Clock();
+const damp = (a, b, k, dt) => a + (b - a) * (1 - Math.exp(-k * dt));
+function frame() {
+  const dt = Math.min(clock.getDelta(), 0.05), t = clock.elapsedTime;
+
+  if (tgtY !== null) {                          // smooth fly-to
+    rotY = damp(rotY, tgtY, 3.2, dt); rotX = damp(rotX, tgtX, 3.2, dt);
+  } else if (!dragging) {
+    rotY += velY * dt; rotX = Math.max(-1.3, Math.min(1.3, rotX + velX * dt)); // inertia
+    velY = damp(velY, 0, 3, dt); velX = damp(velX, 0, 3, dt);
+    const idle = t - lastInteract > RESUME_AFTER;
+    if (idle && active < 0 && !reduceMotion) rotY += AUTO * dt;      // auto-rotate, paused while interacting
+    if (idle) rotX = damp(rotX, active < 0 ? 0.3 : rotX, 0.4, dt);
+  }
+  zoom = damp(zoom, tgtZoom, 3, dt);
+  camera.position.set(0, 0, zoom); camera.lookAt(0, 0, 0);
+  globe.rotation.set(rotX, rotY, 0);
+
+  markers.forEach((m, i) => {
+    const on = i === active, pulse = 0.5 + 0.5 * Math.sin(t * 2.2 + m.phase);
+    const s = (on ? 0.2 : 0.11) + pulse * (on ? 0.08 : 0.05);
+    m.halo.scale.setScalar(damp(m.halo.scale.x, s, 8, dt));
+    const c = on ? COL_ON : COL;
+    m.core.material.color.lerp(c, 0.2); m.halo.material.color.lerp(c, 0.2);
+    m.core.scale.setScalar(on ? 1.5 : 1);
+  });
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+frame();
+setTimeout(() => document.getElementById("hint").style.opacity = 0, 7000);
+</script>
+</body>
+</html>

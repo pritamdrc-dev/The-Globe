@@ -1,0 +1,7 @@
+{
+  "name": "atlas-globe",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Rotating 3D globe with glowing markers, drag-to-spin and click-to-focus.",
+  "scripts": { "start": "npx --yes serve . -l 3000" }
+}
