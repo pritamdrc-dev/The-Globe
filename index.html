@@ -128,8 +128,8 @@ scene.add(rim);
 {
   const n = 900, p = new Float32Array(n * 3);
   for (let i = 0; i < n; i++) {
-    const v = new THREE.Vector3().randomDirection().multiplyScalar(20 + Math.random() * 20);
-    p.set([v.x, v.y, v.z], i * 3);
+    const u = Math.random() * 2 - 1, a = Math.random() * Math.PI * 2, s = Math.sqrt(1 - u * u), d = 20 + Math.random() * 20;
+    p.set([s * Math.cos(a) * d, u * d, s * Math.sin(a) * d], i * 3);
   }
   const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.BufferAttribute(p, 3));
   scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0x9db4e0, size: 0.07, sizeAttenuation: true, transparent: true, opacity: 0.7 })));
